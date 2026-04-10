@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TypedDict
+from typing import TypedDict, cast
 
 from sqlmodel import Session
 
 from core.errors import ChorusError, classify_exception
+from core.graph_runtime import build_graph_config
 from core.logging_utils import get_logger, log_event
 from core.models import Run, RunStatus
+from core.state import FinalChorusState, build_initial_chorus_state
 from db.database import create_db_and_tables, engine
 from graph import build_chorus_graph
 
@@ -15,13 +17,30 @@ from graph import build_chorus_graph
 class RunExecutionResult(TypedDict):
     run_id: int
     status: str
-    project_spec: Any
-    implementation_spec: Any
-    pending_checkpoint: Any
+    project_spec: object | None
+    implementation_spec: object | None
+    pending_checkpoint: object | None
     current_stage: str | None
 
 
 logger = get_logger(__name__)
+
+
+def _extract_pending_checkpoint(result: object) -> object | None:
+    if not isinstance(result, dict):
+        return None
+
+    interrupts = result.get("__interrupt__")
+    if not interrupts:
+        return None
+
+    first_interrupt = interrupts[0]
+    return {
+        "checkpoint_id": getattr(first_interrupt, "id", "pending"),
+        "artifact_type": "project_spec",
+        "current_stage": "human_review",
+        "payload": getattr(first_interrupt, "value", None),
+    }
 
 
 def _update_run_state(run_id: int, status: RunStatus, current_stage: str | None = None) -> None:
@@ -37,7 +56,7 @@ def _update_run_state(run_id: int, status: RunStatus, current_stage: str | None 
         session.commit()
 
 
-def _build_run_result(run_id: int, status: str, final_state: dict[str, Any]) -> RunExecutionResult:
+def _build_run_result(run_id: int, status: str, final_state: FinalChorusState) -> RunExecutionResult:
     return {
         "run_id": run_id,
         "status": status,
@@ -69,17 +88,12 @@ def execute_run(run_id: int, raw_input: str, mode: str) -> RunExecutionResult:
     _update_run_state(run_id, RunStatus.running, "intake")
     log_event(logger, logging.INFO, "run_started", run_id=run_id, mode=mode, current_stage="intake")
 
-    initial_state = {
-        "run_id": run_id,
-        "mode": mode,
-        "raw_input": raw_input,
-        "loop_count": 0,
-        "current_stage": "intake",
-    }
+    initial_state = build_initial_chorus_state(run_id=run_id, mode=mode, raw_input=raw_input)
 
     try:
         app = build_chorus_graph()
-        final_state = app.invoke(initial_state)
+        raw_result = app.invoke(initial_state, config=build_graph_config(run_id))
+        final_state = cast(FinalChorusState, raw_result)
     except Exception as exc:
         classified_error = classify_exception(exc)
         _update_run_state(run_id, RunStatus.failed)
@@ -95,8 +109,10 @@ def execute_run(run_id: int, raw_input: str, mode: str) -> RunExecutionResult:
         )
         raise classified_error from exc
 
-    if final_state.get("pending_checkpoint"):
-        _update_run_state(run_id, RunStatus.paused, final_state.get("current_stage"))
+    pending_checkpoint = _extract_pending_checkpoint(raw_result) or final_state.get("pending_checkpoint")
+
+    if pending_checkpoint:
+        _update_run_state(run_id, RunStatus.paused, "human_review")
         status = "paused"
     else:
         _update_run_state(run_id, RunStatus.completed, "done")
@@ -109,9 +125,13 @@ def execute_run(run_id: int, raw_input: str, mode: str) -> RunExecutionResult:
         mode=mode,
         status=status,
         current_stage=final_state.get("current_stage"),
-        pending_checkpoint=bool(final_state.get("pending_checkpoint")),
+        pending_checkpoint=bool(pending_checkpoint),
     )
-    return _build_run_result(run_id, status, final_state)
+    result = _build_run_result(run_id, status, final_state)
+    result["pending_checkpoint"] = pending_checkpoint
+    if pending_checkpoint:
+        result["current_stage"] = "human_review"
+    return result
 
 
 def run_chorus_pipeline(raw_input: str, mode: str) -> RunExecutionResult:

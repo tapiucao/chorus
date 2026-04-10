@@ -1,4 +1,4 @@
-from graph import route_after_intake, route_after_critic, route_after_mediator
+from graph import route_after_human_review, route_after_intake, route_after_critic, route_after_mediator
 from core.state import ChorusState
 from core.schemas import CritiqueReport, CritiqueFinding
 
@@ -36,3 +36,12 @@ def test_route_after_critic_loopback():
 def test_route_after_critic_with_no_reports_proceeds_to_mediator():
     state = ChorusState(critique_reports=[], loop_count=0)
     assert route_after_critic(state) == "mediator"
+
+
+def test_route_after_mediator_human_review_takes_precedence():
+    state = ChorusState(mode="full", human_review_enabled=True)
+    assert route_after_mediator(state) == "human_review"
+
+
+def test_route_after_human_review_matches_mode():
+    assert route_after_human_review(ChorusState(mode="full")) == "implementation_debate"

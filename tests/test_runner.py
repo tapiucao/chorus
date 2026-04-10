@@ -2,8 +2,10 @@ import logging
 from unittest.mock import patch
 
 import pytest
+from langgraph.types import Interrupt
 
 from core.errors import ChorusProviderError, ChorusValidationError
+from core.graph_runtime import build_graph_config
 from core.models import RunStatus
 from core.schemas import ImplementationSpec, ProjectSpec
 from core.runner import execute_run, run_chorus_pipeline
@@ -44,6 +46,17 @@ def test_run_chorus_pipeline_returns_completed_result():
 
     assert mock_create_db.call_count == 2
     mock_build.assert_called_once()
+    mock_build.return_value.invoke.assert_called_once_with(
+        {
+            "run_id": 7,
+            "mode": "idea_spec",
+            "raw_input": "Build a receipts app",
+            "loop_count": 0,
+            "current_stage": "intake",
+            "human_review_enabled": False,
+        },
+        config=build_graph_config(7),
+    )
     session.get.assert_called()
     assert result["run_id"] == 7
     assert result["status"] == "completed"
@@ -54,8 +67,8 @@ def test_run_chorus_pipeline_marks_paused_runs():
     fake_state = {
         "project_spec": None,
         "implementation_spec": None,
-        "pending_checkpoint": {"checkpoint_id": 1},
         "current_stage": "mediator",
+        "__interrupt__": [Interrupt(value={"message": "Review the generated project spec before continuing."}, id="abc123")],
     }
 
     with patch("core.runner.create_db_and_tables"), patch("core.runner.build_chorus_graph") as mock_build, patch("core.runner.Session") as mock_session:
@@ -66,7 +79,13 @@ def test_run_chorus_pipeline_marks_paused_runs():
 
     assert result["run_id"] == 7
     assert result["status"] == "paused"
-    assert result["pending_checkpoint"] == {"checkpoint_id": 1}
+    assert result["pending_checkpoint"] == {
+        "checkpoint_id": "abc123",
+        "artifact_type": "project_spec",
+        "current_stage": "human_review",
+        "payload": {"message": "Review the generated project spec before continuing."},
+    }
+    assert result["current_stage"] == "human_review"
 
 
 def test_run_chorus_pipeline_rejects_empty_input():

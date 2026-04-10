@@ -1,44 +1,82 @@
 import logging
-from typing import List, Literal
+from dataclasses import dataclass
+from typing import Callable, Literal, TypeVar, TypedDict
 
-from pydantic import BaseModel, Field
-from sqlmodel import Session
-
+from langgraph.types import Command, interrupt
+from langgraph.types import Command
 from core.logging_utils import get_logger, log_event
 from core.models import ArtifactType
-from core.schemas import CritiqueReport, ImplementationSpec, OptionDraft, ProjectSpec
-from core.skills import build_stage_system_prompt, get_stage_skill_snapshot
-from core.state import ChorusState
-from db.database import engine
-from db.operations import save_artifact
-from llm.routing import generate_structured_output
+from core.node_runtime import DefaultNodeRuntime, NodeRuntime
+from core.prompt_builders import (
+    build_critic_prompt,
+    build_exploration_prompt,
+    build_framing_prompt,
+    build_implementation_prompt,
+    build_intake_prompt,
+    build_mediator_prompt,
+)
+from core.schemas import CritiqueReport, ImplementationSpec, ProjectSpec
+from core.skills import get_stage_skill_snapshot
+from core.state import ChorusState, CritiquesList, ExplorationDraft, MaturityClassification, OptionsBundle
 
-# -------------------------------------------------------------------
-# Intermediate Pydantic Models for internal node logic
-# -------------------------------------------------------------------
 logger = get_logger(__name__)
+GeneratedModelT = TypeVar("GeneratedModelT")
+
+# Backward-compatible alias for existing imports/tests.
+OptionsList = OptionsBundle
 
 
-class MaturityClassification(BaseModel):
-    maturity: Literal["raw", "partial", "mature"] = Field(..., description="Strict classification of input maturity.")
-    summary: str
-
-class ExplorationDraft(BaseModel):
-    problem_statement: str
-    target_users: List[str]
-    constraints: List[str]
-    success_criteria: List[str]
-
-class OptionsList(BaseModel):
-    simplest_viable: OptionDraft = Field(..., description="The absolute simplest viable approach.")
-    scalable: OptionDraft = Field(..., description="A robust, scalable approach.")
-    minimal_cost: OptionDraft = Field(..., description="An MVP approach optimizing for lowest immediate cost.")
-
-class CritiquesList(BaseModel):
-    reports: List[CritiqueReport]
+class IntakeNodeUpdate(TypedDict):
+    current_stage: str
+    input_maturity: str
 
 
-def _persist_prompt_contract(run_id: int | None, stage: str, system_prompt: str) -> None:
+class ExplorationNodeUpdate(TypedDict):
+    current_stage: str
+    exploration_draft: ExplorationDraft
+
+
+class FramingNodeUpdate(TypedDict):
+    current_stage: str
+    options_bundle: OptionsBundle
+
+
+class CriticNodeUpdate(TypedDict, total=False):
+    current_stage: str
+    critique_reports: list[CritiqueReport]
+    loop_count: int
+
+
+CriticNextNode = Literal["exploration", "mediator"]
+
+
+class MediatorNodeUpdate(TypedDict):
+    current_stage: str
+    project_spec: ProjectSpec
+
+
+class HumanReviewNodeUpdate(TypedDict):
+    current_stage: str
+    human_feedback: str | dict[str, object] | None
+
+
+class ImplementationNodeUpdate(TypedDict):
+    current_stage: str
+    implementation_spec: ImplementationSpec
+
+
+@dataclass(frozen=True)
+class NodeHandlers:
+    intake: Callable[[ChorusState], IntakeNodeUpdate]
+    exploration: Callable[[ChorusState], ExplorationNodeUpdate]
+    framing: Callable[[ChorusState], FramingNodeUpdate]
+    critic: Callable[[ChorusState], Command[CriticNextNode]]
+    mediator: Callable[[ChorusState], MediatorNodeUpdate]
+    human_review: Callable[[ChorusState], HumanReviewNodeUpdate]
+    implementation_debate: Callable[[ChorusState], ImplementationNodeUpdate]
+
+
+def _persist_prompt_contract(runtime: NodeRuntime, run_id: int | None, stage: str, system_prompt: str) -> None:
     if not run_id:
         return
 
@@ -46,149 +84,178 @@ def _persist_prompt_contract(run_id: int | None, stage: str, system_prompt: str)
         **get_stage_skill_snapshot(stage),  # type: ignore[arg-type]
         "system_prompt": system_prompt,
     }
-    with Session(engine) as session:
-        save_artifact(session, run_id, ArtifactType.prompt_contract, payload)
+    runtime.persist_artifact(run_id, ArtifactType.prompt_contract, payload)
 
-# -------------------------------------------------------------------
-# Node Implementations
-# -------------------------------------------------------------------
-def intake_node(state: ChorusState):
+
+def _run_stage_generation(
+    *,
+    state: ChorusState,
+    runtime: NodeRuntime,
+    stage: str,
+    prompt: dict[str, object],
+    response_model: type[GeneratedModelT],
+) -> GeneratedModelT:
+    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage=stage)
+    _persist_prompt_contract(runtime, state.get("run_id"), prompt["stage"], prompt["system_prompt"])  # type: ignore[arg-type]
+    return runtime.generate(response_model, prompt["messages"], profile=prompt["profile"])  # type: ignore[arg-type]
+
+
+def intake_node_with_runtime(state: ChorusState, runtime: NodeRuntime) -> IntakeNodeUpdate:
     """Explorer: Classifies input maturity."""
-    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage="intake")
-    system_prompt = build_stage_system_prompt(
-        "intake",
-        "You classify product specs. Return maturity as 'raw', 'partial', or 'mature'.",
+    prompt = build_intake_prompt(state["raw_input"])
+    classification = _run_stage_generation(
+        state=state,
+        runtime=runtime,
+        stage="intake",
+        prompt=prompt,
+        response_model=MaturityClassification,
     )
-    _persist_prompt_contract(state.get("run_id"), "intake", system_prompt)
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Classify this input:\n\n{state['raw_input']}"}
-    ]
-    
-    classification = generate_structured_output(MaturityClassification, messages, profile="extraction")
     return {"current_stage": "intake", "input_maturity": classification.maturity}
 
 
-def exploration_node(state: ChorusState):
+def exploration_node_with_runtime(state: ChorusState, runtime: NodeRuntime) -> ExplorationNodeUpdate:
     """Explorer: Expands raw idea into constraints and problem statements."""
-    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage="exploration")
-    system_prompt = build_stage_system_prompt(
-        "exploration",
-        "Extract the core problem, target users, and implicit constraints from this raw idea. Do not solve the problem yet.",
+    prompt = build_exploration_prompt(state["raw_input"])
+    draft = _run_stage_generation(
+        state=state,
+        runtime=runtime,
+        stage="exploration",
+        prompt=prompt,
+        response_model=ExplorationDraft,
     )
-    _persist_prompt_contract(state.get("run_id"), "exploration", system_prompt)
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Idea:\n{state['raw_input']}"}
-    ]
-    
-    draft = generate_structured_output(ExplorationDraft, messages, profile="synthesis")
-    
-    # Save the exploration draft separately to avoid mutating raw_input
-    return {"current_stage": "exploration", "exploration_draft": draft.model_dump()}
+    return {"current_stage": "exploration", "exploration_draft": draft}
 
 
-def framing_node(state: ChorusState):
+def framing_node_with_runtime(state: ChorusState, runtime: NodeRuntime) -> FramingNodeUpdate:
     """Architect: Generates multiple option drafts."""
-    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage="framing")
-    
-    exploration_context = ""
-    if state.get("exploration_draft"):
-        exploration_context = f"\n\nExploration Findings:\n{state['exploration_draft']}"
-    system_prompt = build_stage_system_prompt(
-        "framing",
-        "Generate exactly 3 distinct options: simplest_viable, scalable, and minimal_cost.",
+    prompt = build_framing_prompt(state["raw_input"], state.get("exploration_draft"))
+    result = _run_stage_generation(
+        state=state,
+        runtime=runtime,
+        stage="framing",
+        prompt=prompt,
+        response_model=OptionsBundle,
     )
-    _persist_prompt_contract(state.get("run_id"), "framing", system_prompt)
-        
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Raw Context:\n{state['raw_input']}{exploration_context}"}
-    ]
-    
-    result = generate_structured_output(OptionsList, messages, profile="synthesis")
-    
-    # Flatten strictly requested fields into the list expected by the state
-    options_list = [result.simplest_viable, result.scalable, result.minimal_cost]
-    return {"current_stage": "framing", "options_drafts": options_list}
+    return {"current_stage": "framing", "options_bundle": result}
 
 
-def critic_node(state: ChorusState):
+def critic_node_with_runtime(state: ChorusState, runtime: NodeRuntime) -> Command[CriticNextNode]:
     """Critic: Stress tests the options generated by the Architect."""
-    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage="critic")
-    
-    options_json = "\n".join([opt.model_dump_json() for opt in state.get("options_drafts", [])])
-    system_prompt = build_stage_system_prompt(
-        "critic",
-        "Critique the provided implementation options. Be ruthless about complexity, assumptions, and edge cases. Status must be 'proceed', 'pivot', or 'reject'.",
+    prompt = build_critic_prompt(state.get("options_bundle"))
+    result = _run_stage_generation(
+        state=state,
+        runtime=runtime,
+        stage="critic",
+        prompt=prompt,
+        response_model=CritiquesList,
     )
-    _persist_prompt_contract(state.get("run_id"), "critic", system_prompt)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Options to critique:\n{options_json}"}
-    ]
-    
-    result = generate_structured_output(CritiquesList, messages, profile="critic")
-    
+
     reports = result.reports
-    update = {"current_stage": "critic", "critique_reports": reports}
-    
+    update: CriticNodeUpdate = {"current_stage": "critic", "critique_reports": reports}
+
     if reports and all(r.recommendation_status == "reject" for r in reports):
         update["loop_count"] = state.get("loop_count", 0) + 1
-        
-    return update
+
+    goto: CriticNextNode = "mediator"
+    if not reports:
+        goto = "mediator"
+    elif all(r.recommendation_status == "reject" for r in reports):
+        goto = "mediator" if update.get("loop_count", state.get("loop_count", 0)) >= 3 else "exploration"
+
+    return Command(update=update, goto=goto)
 
 
-def mediator_node(state: ChorusState):
+def mediator_node_with_runtime(state: ChorusState, runtime: NodeRuntime) -> MediatorNodeUpdate:
     """Scope Guardian / Spec Writer: Synthesizes final ProjectSpec."""
-    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage="mediator")
-    
-    options_json = "\n".join([opt.model_dump_json() for opt in state.get("options_drafts", [])])
-    critiques_json = "\n".join([r.model_dump_json() for r in state.get("critique_reports", [])])
-    exploration_context = state.get("exploration_draft", {})
-    system_prompt = build_stage_system_prompt(
-        "mediator",
-        "Synthesize the final Project Spec. Choose the best approach based on the Architect's options and the Critic's reports. Enforce MVP boundaries.",
+    prompt = build_mediator_prompt(
+        state["raw_input"],
+        state.get("exploration_draft"),
+        state.get("options_bundle"),
+        state.get("critique_reports", []),
     )
-    _persist_prompt_contract(state.get("run_id"), "mediator", system_prompt)
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Original Idea: {state['raw_input']}\nExploration: {exploration_context}\nOptions:\n{options_json}\nCritiques:\n{critiques_json}"}
-    ]
-    
-    final_spec = generate_structured_output(ProjectSpec, messages, profile="synthesis")
-    
-    # Persist artifact
+    final_spec = _run_stage_generation(
+        state=state,
+        runtime=runtime,
+        stage="mediator",
+        prompt=prompt,
+        response_model=ProjectSpec,
+    )
+
     if state.get("run_id"):
-        with Session(engine) as session:
-            save_artifact(session, state["run_id"], ArtifactType.project_spec, final_spec)
-            
+        runtime.persist_artifact(state["run_id"], ArtifactType.project_spec, final_spec)
+
     return {"current_stage": "mediator", "project_spec": final_spec}
 
-def implementation_debate_node(state: ChorusState):
-    """Implementation Architect: Debates architecture and produces ImplementationSpec."""
-    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage="implementation_debate")
-    
-    project_spec_json = state.get("project_spec").model_dump_json() if state.get("project_spec") else state.get("raw_input")
-    system_prompt = build_stage_system_prompt(
-        "implementation_debate",
-        "Translate the approved ProjectSpec into an ImplementationSpec. Detail architecture, boundaries, and delivery sequence.",
+
+def human_review_node(state: ChorusState) -> HumanReviewNodeUpdate:
+    log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage="human_review")
+    project_spec = state.get("project_spec")
+    feedback = interrupt(
+        {
+            "artifact_type": "project_spec",
+            "current_stage": "human_review",
+            "project_spec": project_spec.model_dump() if project_spec else None,
+            "message": "Review the generated project spec before continuing.",
+        }
     )
-    _persist_prompt_contract(state.get("run_id"), "implementation_debate", system_prompt)
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Project Spec:\n{project_spec_json}"}
-    ]
-    
-    impl_spec = generate_structured_output(ImplementationSpec, messages, profile="synthesis")
-    
-    # Persist artifact
+    return {"current_stage": "human_review", "human_feedback": feedback}
+
+
+def implementation_debate_node_with_runtime(state: ChorusState, runtime: NodeRuntime) -> ImplementationNodeUpdate:
+    """Implementation Architect: Debates architecture and produces ImplementationSpec."""
+    prompt = build_implementation_prompt(state["raw_input"], state.get("project_spec"))
+    impl_spec = _run_stage_generation(
+        state=state,
+        runtime=runtime,
+        stage="implementation_debate",
+        prompt=prompt,
+        response_model=ImplementationSpec,
+    )
+
     if state.get("run_id"):
-        with Session(engine) as session:
-            save_artifact(session, state["run_id"], ArtifactType.implementation_spec, impl_spec)
-            
+        runtime.persist_artifact(state["run_id"], ArtifactType.implementation_spec, impl_spec)
+
     return {"current_stage": "implementation_debate", "implementation_spec": impl_spec}
+
+
+def build_node_handlers(runtime: NodeRuntime) -> NodeHandlers:
+    return NodeHandlers(
+        intake=lambda state: intake_node_with_runtime(state, runtime),
+        exploration=lambda state: exploration_node_with_runtime(state, runtime),
+        framing=lambda state: framing_node_with_runtime(state, runtime),
+        critic=lambda state: critic_node_with_runtime(state, runtime),
+        mediator=lambda state: mediator_node_with_runtime(state, runtime),
+        human_review=human_review_node,
+        implementation_debate=lambda state: implementation_debate_node_with_runtime(state, runtime),
+    )
+
+
+_DEFAULT_NODE_HANDLERS = build_node_handlers(DefaultNodeRuntime())
+
+
+def intake_node(state: ChorusState) -> IntakeNodeUpdate:
+    return _DEFAULT_NODE_HANDLERS.intake(state)
+
+
+def exploration_node(state: ChorusState) -> ExplorationNodeUpdate:
+    return _DEFAULT_NODE_HANDLERS.exploration(state)
+
+
+def framing_node(state: ChorusState) -> FramingNodeUpdate:
+    return _DEFAULT_NODE_HANDLERS.framing(state)
+
+
+def critic_node(state: ChorusState) -> Command[CriticNextNode]:
+    return _DEFAULT_NODE_HANDLERS.critic(state)
+
+
+def mediator_node(state: ChorusState) -> MediatorNodeUpdate:
+    return _DEFAULT_NODE_HANDLERS.mediator(state)
+
+
+def human_review_node_default(state: ChorusState) -> HumanReviewNodeUpdate:
+    return _DEFAULT_NODE_HANDLERS.human_review(state)
+
+
+def implementation_debate_node(state: ChorusState) -> ImplementationNodeUpdate:
+    return _DEFAULT_NODE_HANDLERS.implementation_debate(state)

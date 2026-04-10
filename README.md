@@ -100,6 +100,12 @@ Run the full test suite:
 ./venv/bin/pytest -q
 ```
 
+For a step-by-step local run and troubleshooting flow, see:
+
+```text
+docs/local-testing.md
+```
+
 Notes:
 - `llm/routing.py` forces `LITELLM_LOCAL_MODEL_COST_MAP=true` by default so local and CI test runs do not block on LiteLLM network fetches in restricted environments.
 - The current suite covers runner, CLI, routing, DB, graph, schema, skill, and web contracts.
