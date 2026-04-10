@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Request
@@ -8,10 +9,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from core import runner
+from core.errors import ChorusError, error_payload
+from core.logging_utils import get_logger, log_event
 from core.skills import STAGE_SKILLS
 from db import database as db
 from db.database import create_db_and_tables
-from web.renderers import build_documents
 from web.schemas import RunRequest
 from web import services as web_services
 
@@ -20,6 +23,7 @@ WEB_ROOT = Path(__file__).resolve().parent
 TEMPLATES_DIR = WEB_ROOT / "templates"
 STATIC_DIR = WEB_ROOT / "static"
 engine = db.engine
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -38,16 +42,11 @@ def _sync_service_dependencies() -> None:
     web_services.db.create_db_and_tables = create_db_and_tables
 
 
-def _build_sync_run_response(result: dict, mode: str) -> dict:
-    return {
-        "run_id": result["run_id"],
-        "status": result["status"],
-        "mode": mode,
-        "current_stage": result.get("current_stage"),
-        "project_spec": result["project_spec"].model_dump() if result["project_spec"] else None,
-        "implementation_spec": result["implementation_spec"].model_dump() if result["implementation_spec"] else None,
-        "documents": build_documents(result["project_spec"], result["implementation_spec"]),
-    }
+@app.exception_handler(ChorusError)
+async def handle_chorus_error(_: Request, exc: ChorusError) -> JSONResponse:
+    log_event(logger, logging.ERROR, "http_request_failed", error_code=exc.code, error_message=str(exc))
+    status_code = 400 if exc.code == "validation_error" else 502 if exc.code == "provider_error" else 500
+    return JSONResponse(status_code=status_code, content=error_payload(exc))
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -56,25 +55,14 @@ def index(request: Request) -> HTMLResponse:
 
 
 def create_run(request: RunRequest, background_tasks: BackgroundTasks | None = None) -> dict:
-    from importlib import import_module
-
     _sync_service_dependencies()
-    runner = import_module("core.runner")
 
-    if background_tasks is None and hasattr(runner, "run_chorus_pipeline"):
-        result = runner.run_chorus_pipeline(raw_input=request.idea, mode=request.mode)
-        if not hasattr(runner, "create_run_record"):
-            return _build_sync_run_response(result, request.mode)
-        return get_run(result["run_id"])
-
-    create_run_record = runner.create_run_record
-    execute_run = runner.execute_run
-    run_id = create_run_record(mode=request.mode, current_stage="queued")
     if background_tasks is None:
-        execute_run(run_id, request.idea, request.mode)
-        return get_run(run_id)
+        result = runner.run_chorus_pipeline(raw_input=request.idea, mode=request.mode)
+        return web_services.build_sync_run_payload(result, request.mode)
 
-    background_tasks.add_task(execute_run, run_id, request.idea, request.mode)
+    run_id = runner.create_run_record(mode=request.mode, current_stage="queued")
+    background_tasks.add_task(runner.execute_run, run_id, request.idea, request.mode)
     return web_services.build_pending_run_payload(run_id=run_id, mode=request.mode, current_stage="queued")
 
 

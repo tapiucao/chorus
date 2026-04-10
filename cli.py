@@ -7,6 +7,7 @@ from pathlib import Path
 # Ensure local imports work regardless of execution directory
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
+from core.errors import ChorusError, ChorusProviderError, ChorusValidationError
 from core.models import Artifact, Run, RunStatus
 from core.skills import STAGE_SKILLS
 from core.runner import run_chorus_pipeline
@@ -25,6 +26,14 @@ def print_v(msg, verbose=False):
 
 def _status_value(value):
     return value.value if hasattr(value, "value") else value
+
+
+def _exit_code_for_error(exc: Exception) -> int:
+    if isinstance(exc, ChorusProviderError):
+        return EXIT_PROVIDER_ERR
+    if isinstance(exc, (ChorusValidationError, ChorusError)):
+        return EXIT_VALIDATION_ERR
+    return EXIT_VALIDATION_ERR
 
 
 def _read_raw_input(args) -> str:
@@ -122,12 +131,7 @@ def run_pipeline(args):
         print_v(f"[VERBOSE] Exception trace: {err_msg}", args.verbose)
         if args.output == "pretty":
             print(f"\n[!] Pipeline Failed: {err_msg}", file=sys.stderr)
-
-        # Simple heuristic to differentiate LLM errors from validation errors
-        if "litellm" in err_msg.lower() or "timeout" in err_msg.lower() or "api" in err_msg.lower():
-            sys.exit(EXIT_PROVIDER_ERR)
-        else:
-            sys.exit(EXIT_VALIDATION_ERR)
+        sys.exit(_exit_code_for_error(e))
 
 def inspect_run(args):
     create_db_and_tables()

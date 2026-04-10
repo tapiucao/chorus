@@ -1,10 +1,12 @@
+import logging
 from unittest.mock import patch
 
 import pytest
 
+from core.errors import ChorusProviderError, ChorusValidationError
 from core.models import RunStatus
 from core.schemas import ImplementationSpec, ProjectSpec
-from core.runner import run_chorus_pipeline
+from core.runner import execute_run, run_chorus_pipeline
 from web.renderers import build_documents, render_implementation_spec_markdown, render_project_spec_markdown
 
 
@@ -68,8 +70,39 @@ def test_run_chorus_pipeline_marks_paused_runs():
 
 
 def test_run_chorus_pipeline_rejects_empty_input():
-    with pytest.raises(ValueError, match="raw_input must not be empty"):
+    with pytest.raises(ChorusValidationError, match="raw_input must not be empty"):
         run_chorus_pipeline(raw_input="   ", mode="idea_spec")
+
+
+def test_execute_run_logs_start_and_completion(caplog):
+    fake_state = {
+        "project_spec": None,
+        "implementation_spec": None,
+        "pending_checkpoint": None,
+        "current_stage": "done",
+    }
+
+    with caplog.at_level(logging.INFO), patch("core.runner.create_db_and_tables"), patch("core.runner.build_chorus_graph") as mock_build, patch("core.runner.Session") as mock_session:
+        _mock_session(mock_session)
+        mock_build.return_value.invoke.return_value = fake_state
+
+        result = execute_run(run_id=7, raw_input="Build a receipts app", mode="idea_spec")
+
+    assert result["status"] == "completed"
+    assert "event=run_started" in caplog.text
+    assert "event=run_finished" in caplog.text
+
+
+def test_execute_run_maps_provider_errors_to_failed_run_state(caplog):
+    with caplog.at_level(logging.ERROR), patch("core.runner.create_db_and_tables"), patch("core.runner.build_chorus_graph") as mock_build, patch("core.runner.Session") as mock_session:
+        session = _mock_session(mock_session)
+        mock_build.return_value.invoke.side_effect = RuntimeError("API timeout from provider")
+
+        with pytest.raises(ChorusProviderError):
+            execute_run(run_id=7, raw_input="Build a receipts app", mode="idea_spec")
+
+    assert session.get.called
+    assert "event=run_failed" in caplog.text
 
 
 def _project_spec() -> ProjectSpec:

@@ -85,3 +85,21 @@ The UI supports:
 - choosing `idea_spec` or `full`
 - previewing `Project Spec` and `Implementation Spec` in tabs
 - downloading `.json` and `.md` outputs
+
+## Development
+
+Install the local dev dependencies:
+
+```bash
+./venv/bin/pip install -r requirements-dev.txt
+```
+
+Run the full test suite:
+
+```bash
+./venv/bin/pytest -q
+```
+
+Notes:
+- `llm/routing.py` forces `LITELLM_LOCAL_MODEL_COST_MAP=true` by default so local and CI test runs do not block on LiteLLM network fetches in restricted environments.
+- The current suite covers runner, CLI, routing, DB, graph, schema, skill, and web contracts.

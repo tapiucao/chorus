@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
@@ -11,6 +13,14 @@ from web.renderers import build_documents, render_implementation_spec_markdown, 
 
 def ensure_db() -> None:
     db.create_db_and_tables()
+
+
+def _enum_value(value: object) -> object:
+    return value.value if hasattr(value, "value") else value
+
+
+def _serialize_payload(payload: object) -> object:
+    return payload.model_dump() if hasattr(payload, "model_dump") else payload
 
 
 def artifact_payload_to_model(artifact: Artifact) -> ProjectSpec | ImplementationSpec | dict:
@@ -62,9 +72,9 @@ def build_run_payload(run: Run, artifacts: list[Artifact], configured_skills: di
         serialized_artifacts.append(
             {
                 "id": artifact.id,
-                "type": artifact.artifact_type.value if hasattr(artifact.artifact_type, "value") else artifact.artifact_type,
+                "type": _enum_value(artifact.artifact_type),
                 "version": artifact.schema_version,
-                "payload": payload.model_dump() if hasattr(payload, "model_dump") else payload,
+                "payload": _serialize_payload(payload),
             }
         )
 
@@ -72,11 +82,23 @@ def build_run_payload(run: Run, artifacts: list[Artifact], configured_skills: di
         "run_id": run.id,
         "id": run.id,
         "mode": run.mode,
-        "status": run.status.value if hasattr(run.status, "value") else run.status,
+        "status": _enum_value(run.status),
         "current_stage": run.current_stage,
         "configured_skills": configured_skills,
         "artifacts": serialized_artifacts,
         "documents": documents,
+    }
+
+
+def build_sync_run_payload(result: dict[str, Any], mode: str) -> dict[str, Any]:
+    return {
+        "run_id": result["run_id"],
+        "status": result["status"],
+        "mode": mode,
+        "current_stage": result.get("current_stage"),
+        "project_spec": _serialize_payload(result["project_spec"]) if result["project_spec"] else None,
+        "implementation_spec": _serialize_payload(result["implementation_spec"]) if result["implementation_spec"] else None,
+        "documents": build_documents(result["project_spec"], result["implementation_spec"]),
     }
 
 

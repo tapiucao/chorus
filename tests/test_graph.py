@@ -31,3 +31,8 @@ def test_route_after_critic_loopback():
     report_proceed = CritiqueReport(option_id="2", findings=[finding], implementation_hazards=[], dependency_risks=[], ambiguity_risks=[], recommendation_status="proceed")
     state = ChorusState(critique_reports=[report_reject, report_proceed], loop_count=0)
     assert route_after_critic(state) == "mediator"
+
+
+def test_route_after_critic_with_no_reports_proceeds_to_mediator():
+    state = ChorusState(critique_reports=[], loop_count=0)
+    assert route_after_critic(state) == "mediator"

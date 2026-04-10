@@ -1,8 +1,11 @@
-import litellm
-import instructor
 import os
+from typing import Dict, List, Type
+
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+
+import instructor
+import litellm
 from pydantic import BaseModel
-from typing import Type, List, Dict
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 
