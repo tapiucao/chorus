@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chorus</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Chorus</p>
+        <h1>Turn a raw idea into a reviewable spec.</h1>
+        <p class="lede">
+          Submit an idea, let Chorus mature it into a spec, preview the result here,
+          and download the generated documents.
+        </p>
+      </section>
+
+      <section class="layout">
+        <form id="idea-form" class="panel form">
+          <div class="form-header">
+            <div>
+              <p class="eyebrow">Prompt</p>
+              <h2>Start a run</h2>
+            </div>
+            <p class="form-copy">Keep the input raw. Chorus will extract scope, surface trade-offs, and turn it into reviewable output.</p>
+          </div>
+
+          <div class="field">
+            <label for="idea">Idea</label>
+            <textarea id="idea" name="idea" rows="10" placeholder="Describe what you want to build..." required></textarea>
+          </div>
+
+          <div class="controls">
+            <div class="field">
+              <label for="mode">Mode</label>
+              <select id="mode" name="mode">
+                <option value="idea_spec">idea_spec</option>
+                <option value="full">full</option>
+              </select>
+            </div>
+            <div class="mode-note">
+              <span class="mode-chip">idea_spec</span>
+              <span>stops after the project spec</span>
+              <span class="mode-chip">full</span>
+              <span>continues into implementation planning</span>
+            </div>
+          </div>
+
+          <button type="submit" class="primary">Generate</button>
+          <p id="status" class="status">Waiting for input.</p>
+        </form>
+
+        <section class="panel preview">
+          <div class="preview-header">
+            <div>
+              <p class="eyebrow">Preview</p>
+              <h2 id="run-summary">No run yet.</h2>
+            </div>
+            <div class="downloads">
+              <a id="download-json" class="ghost" href="#" download>Download JSON</a>
+              <a id="download-project-md" class="ghost" href="#" download>Project Spec</a>
+              <a id="download-implementation-md" class="ghost" href="#" download hidden>Implementation Spec</a>
+            </div>
+          </div>
+
+          <div class="preview-meta">
+            <div class="meta-card">
+              <span class="meta-label">Run status</span>
+              <strong id="run-status-pill" class="status-pill">idle</strong>
+            </div>
+            <div class="meta-card">
+              <span class="meta-label">Current stage</span>
+              <strong id="run-stage">n/a</strong>
+            </div>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Generated documents">
+            <button class="tab active" type="button" data-target="project-panel" data-tab="project">Project Spec</button>
+            <button class="tab" type="button" data-target="implementation-panel" data-tab="implementation" hidden>Implementation Spec</button>
+          </div>
+
+          <article id="project-panel" class="doc-panel active" role="tabpanel">
+            <pre id="project-preview" class="markdown">Submit an idea to see the project spec here.</pre>
+          </article>
+
+          <article id="implementation-panel" class="doc-panel" role="tabpanel" hidden>
+            <pre id="implementation-preview" class="markdown">Implementation spec will appear here when available.</pre>
+          </article>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
