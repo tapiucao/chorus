@@ -1,9 +1,12 @@
+from typing import Any
+
 from langgraph.graph import END, StateGraph
 
 from agents.nodes import build_node_handlers
-from core.graph_runtime import GRAPH_CHECKPOINTER
+from core.graph_runtime import get_checkpointer
 from core.node_runtime import DefaultNodeRuntime, NodeRuntime
 from core.state import ChorusState
+
 
 # -------------------------------------------------------------------
 # Conditional Edge Routers
@@ -17,7 +20,7 @@ def route_after_intake(state: ChorusState) -> str:
 
 def route_after_critic(state: ChorusState) -> str:
     """
-    Evaluates the Critic's report. 
+    Evaluates the Critic's report.
     Triggers a loopback if ALL options were rejected and risk is too high.
     """
     reports = state.get("critique_reports", [])
@@ -48,30 +51,35 @@ def route_after_human_review(state: ChorusState) -> str:
         return "implementation_debate"
     return END
 
+
 # -------------------------------------------------------------------
 # Graph Compilation
 # -------------------------------------------------------------------
-def build_chorus_graph(runtime: NodeRuntime | None = None):
+def build_chorus_graph(runtime: NodeRuntime | None = None) -> Any:
     handlers = build_node_handlers(runtime or DefaultNodeRuntime())
     workflow = StateGraph(ChorusState)
 
     # 1. Add Voices (Nodes)
-    workflow.add_node("intake", handlers.intake)
-    workflow.add_node("exploration", handlers.exploration)
-    workflow.add_node("framing", handlers.framing)
-    workflow.add_node("critic", handlers.critic, destinations=("exploration", "mediator"))
-    workflow.add_node("mediator", handlers.mediator)
-    workflow.add_node("human_review", handlers.human_review)
-    workflow.add_node("implementation_debate", handlers.implementation_debate)
+    workflow.add_node("intake", handlers.intake)  # type: ignore[call-overload]
+    workflow.add_node("exploration", handlers.exploration)  # type: ignore[call-overload]
+    workflow.add_node("framing", handlers.framing)  # type: ignore[call-overload]
+    workflow.add_node("critic", handlers.critic, destinations=("exploration", "mediator"))  # type: ignore[call-overload]
+    workflow.add_node("mediator", handlers.mediator)  # type: ignore[call-overload]
+    workflow.add_node("human_review", handlers.human_review)  # type: ignore[call-overload]
+    workflow.add_node("implementation_debate", handlers.implementation_debate)  # type: ignore[call-overload]
 
     # 2. Define Flow
     workflow.set_entry_point("intake")
 
     # Intake branches out based on input maturity
-    workflow.add_conditional_edges("intake", route_after_intake, {
-        "exploration": "exploration",
-        "implementation_debate": "implementation_debate",
-    })
+    workflow.add_conditional_edges(
+        "intake",
+        route_after_intake,
+        {
+            "exploration": "exploration",
+            "implementation_debate": "implementation_debate",
+        },
+    )
 
     workflow.add_edge("exploration", "framing")
     workflow.add_edge("framing", "critic")
@@ -79,17 +87,25 @@ def build_chorus_graph(runtime: NodeRuntime | None = None):
     workflow.add_edge("critic", "mediator")
 
     # Mediator decides whether to stop or do full implementation debate
-    workflow.add_conditional_edges("mediator", route_after_mediator, {
-        "human_review": "human_review",
-        "implementation_debate": "implementation_debate",
-        END: END,
-    })
+    workflow.add_conditional_edges(
+        "mediator",
+        route_after_mediator,
+        {
+            "human_review": "human_review",
+            "implementation_debate": "implementation_debate",
+            END: END,
+        },
+    )
 
-    workflow.add_conditional_edges("human_review", route_after_human_review, {
-        "implementation_debate": "implementation_debate",
-        END: END,
-    })
+    workflow.add_conditional_edges(
+        "human_review",
+        route_after_human_review,
+        {
+            "implementation_debate": "implementation_debate",
+            END: END,
+        },
+    )
 
     workflow.add_edge("implementation_debate", END)
 
-    return workflow.compile(checkpointer=GRAPH_CHECKPOINTER)
+    return workflow.compile(checkpointer=get_checkpointer())

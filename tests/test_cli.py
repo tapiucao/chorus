@@ -58,7 +58,10 @@ def test_inspect_run_json_includes_configured_skills():
 def test_run_pipeline_returns_provider_exit_code_for_provider_error(capsys):
     args = Namespace(mode="idea_spec", idea="Build a receipts app", input_file=None, output="pretty", verbose=False)
 
-    with patch("cli.run_chorus_pipeline", side_effect=ChorusProviderError("provider timeout")), pytest.raises(SystemExit) as exc_info:
+    with (
+        patch("cli.run_chorus_pipeline", side_effect=ChorusProviderError("provider timeout")),
+        pytest.raises(SystemExit) as exc_info,
+    ):
         cli.run_pipeline(args)
 
     assert exc_info.value.code == cli.EXIT_PROVIDER_ERR
@@ -68,7 +71,10 @@ def test_run_pipeline_returns_provider_exit_code_for_provider_error(capsys):
 def test_run_pipeline_returns_validation_exit_code_for_validation_error(capsys):
     args = Namespace(mode="idea_spec", idea="Build a receipts app", input_file=None, output="pretty", verbose=False)
 
-    with patch("cli.run_chorus_pipeline", side_effect=ChorusValidationError("bad input")), pytest.raises(SystemExit) as exc_info:
+    with (
+        patch("cli.run_chorus_pipeline", side_effect=ChorusValidationError("bad input")),
+        pytest.raises(SystemExit) as exc_info,
+    ):
         cli.run_pipeline(args)
 
     assert exc_info.value.code == cli.EXIT_VALIDATION_ERR

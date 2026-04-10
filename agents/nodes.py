@@ -1,13 +1,15 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal, TypeVar, TypedDict
+from typing import Literal, TypedDict, TypeVar
 
 from langgraph.types import Command, interrupt
-from langgraph.types import Command
+
 from core.logging_utils import get_logger, log_event
 from core.models import ArtifactType
 from core.node_runtime import DefaultNodeRuntime, NodeRuntime
 from core.prompt_builders import (
+    PromptPackage,
     build_critic_prompt,
     build_exploration_prompt,
     build_framing_prompt,
@@ -17,7 +19,13 @@ from core.prompt_builders import (
 )
 from core.schemas import CritiqueReport, ImplementationSpec, ProjectSpec
 from core.skills import get_stage_skill_snapshot
-from core.state import ChorusState, CritiquesList, ExplorationDraft, MaturityClassification, OptionsBundle
+from core.state import (
+    ChorusState,
+    CritiquesList,
+    ExplorationDraft,
+    MaturityClassification,
+    OptionsBundle,
+)
 
 logger = get_logger(__name__)
 GeneratedModelT = TypeVar("GeneratedModelT")
@@ -87,17 +95,17 @@ def _persist_prompt_contract(runtime: NodeRuntime, run_id: int | None, stage: st
     runtime.persist_artifact(run_id, ArtifactType.prompt_contract, payload)
 
 
-def _run_stage_generation(
+def _run_stage_generation[GeneratedModelT](
     *,
     state: ChorusState,
     runtime: NodeRuntime,
     stage: str,
-    prompt: dict[str, object],
+    prompt: PromptPackage,
     response_model: type[GeneratedModelT],
 ) -> GeneratedModelT:
     log_event(logger, logging.INFO, "node_started", run_id=state.get("run_id"), stage=stage)
-    _persist_prompt_contract(runtime, state.get("run_id"), prompt["stage"], prompt["system_prompt"])  # type: ignore[arg-type]
-    return runtime.generate(response_model, prompt["messages"], profile=prompt["profile"])  # type: ignore[arg-type]
+    _persist_prompt_contract(runtime, state.get("run_id"), prompt["stage"], prompt["system_prompt"])
+    return runtime.generate(response_model, prompt["messages"], profile=prompt["profile"])  # type: ignore[type-var]
 
 
 def intake_node_with_runtime(state: ChorusState, runtime: NodeRuntime) -> IntakeNodeUpdate:

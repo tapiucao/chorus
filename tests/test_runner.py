@@ -6,10 +6,13 @@ from langgraph.types import Interrupt
 
 from core.errors import ChorusProviderError, ChorusValidationError
 from core.graph_runtime import build_graph_config
-from core.models import RunStatus
-from core.schemas import ImplementationSpec, ProjectSpec
 from core.runner import execute_run, run_chorus_pipeline
-from web.renderers import build_documents, render_implementation_spec_markdown, render_project_spec_markdown
+from core.schemas import ImplementationSpec, ProjectSpec
+from web.renderers import (
+    build_documents,
+    render_implementation_spec_markdown,
+    render_project_spec_markdown,
+)
 
 
 def _mock_session(mock_session_cls):
@@ -38,7 +41,11 @@ def test_run_chorus_pipeline_returns_completed_result():
         "current_stage": "done",
     }
 
-    with patch("core.runner.create_db_and_tables") as mock_create_db, patch("core.runner.build_chorus_graph") as mock_build, patch("core.runner.Session") as mock_session:
+    with (
+        patch("core.runner.create_db_and_tables") as mock_create_db,
+        patch("core.runner.build_chorus_graph") as mock_build,
+        patch("core.runner.Session") as mock_session,
+    ):
         session = _mock_session(mock_session)
         mock_build.return_value.invoke.return_value = fake_state
 
@@ -68,10 +75,16 @@ def test_run_chorus_pipeline_marks_paused_runs():
         "project_spec": None,
         "implementation_spec": None,
         "current_stage": "mediator",
-        "__interrupt__": [Interrupt(value={"message": "Review the generated project spec before continuing."}, id="abc123")],
+        "__interrupt__": [
+            Interrupt(value={"message": "Review the generated project spec before continuing."}, id="abc123")
+        ],
     }
 
-    with patch("core.runner.create_db_and_tables"), patch("core.runner.build_chorus_graph") as mock_build, patch("core.runner.Session") as mock_session:
+    with (
+        patch("core.runner.create_db_and_tables"),
+        patch("core.runner.build_chorus_graph") as mock_build,
+        patch("core.runner.Session") as mock_session,
+    ):
         _mock_session(mock_session)
         mock_build.return_value.invoke.return_value = fake_state
 
@@ -101,7 +114,12 @@ def test_execute_run_logs_start_and_completion(caplog):
         "current_stage": "done",
     }
 
-    with caplog.at_level(logging.INFO), patch("core.runner.create_db_and_tables"), patch("core.runner.build_chorus_graph") as mock_build, patch("core.runner.Session") as mock_session:
+    with (
+        caplog.at_level(logging.INFO),
+        patch("core.runner.create_db_and_tables"),
+        patch("core.runner.build_chorus_graph") as mock_build,
+        patch("core.runner.Session") as mock_session,
+    ):
         _mock_session(mock_session)
         mock_build.return_value.invoke.return_value = fake_state
 
@@ -113,7 +131,12 @@ def test_execute_run_logs_start_and_completion(caplog):
 
 
 def test_execute_run_maps_provider_errors_to_failed_run_state(caplog):
-    with caplog.at_level(logging.ERROR), patch("core.runner.create_db_and_tables"), patch("core.runner.build_chorus_graph") as mock_build, patch("core.runner.Session") as mock_session:
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("core.runner.create_db_and_tables"),
+        patch("core.runner.build_chorus_graph") as mock_build,
+        patch("core.runner.Session") as mock_session,
+    ):
         session = _mock_session(mock_session)
         mock_build.return_value.invoke.side_effect = RuntimeError("API timeout from provider")
 

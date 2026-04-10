@@ -1,5 +1,4 @@
 import os
-from typing import Dict, List, Type
 
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
@@ -8,77 +7,22 @@ import litellm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-
-DEFAULT_MODELS = {
-    "extraction": "anthropic/claude-sonnet-4-6",
-    "synthesis": "anthropic/claude-sonnet-4-6",
-    "critic": "anthropic/claude-sonnet-4-6",
-}
-
-DEFAULT_FALLBACKS = {
-    "extraction": ["openai/gpt-4o-mini", "ollama/qwen2.5-coder:3b"],
-    "synthesis": ["openai/gpt-4o", "ollama/qwen2.5-coder:3b"],
-    "critic": ["openai/gpt-4o", "ollama/qwen2.5-coder:3b"],
-}
-
-DEFAULT_TEMPERATURES = {
-    "extraction": 0.1,
-    "synthesis": 0.5,
-    "critic": 0.7,
-    "default": 0.4,
-}
+from core.config import ChorusSettings
 
 
-def _parse_fallbacks(raw: str | None) -> list[str] | None:
-    if raw is None:
-        return None
-    if raw.strip() == "":
-        return []
-    return [item.strip() for item in raw.split(",") if item.strip()]
-
-
+# Module-level wrappers kept for backward compatibility and test isolation.
+# They create a fresh ChorusSettings() so monkeypatch.setenv works in tests.
 def get_model_config(profile: str) -> tuple[str, list[str], float]:
-    """Returns the primary model, fallbacks, and temperature for a profile."""
-    normalized_profile = profile if profile in DEFAULT_MODELS else "synthesis"
-    upper_profile = normalized_profile.upper()
-
-    model_name = os.getenv(
-        f"CHORUS_MODEL_{upper_profile}",
-        DEFAULT_MODELS[normalized_profile],
-    )
-    raw_fallbacks = _parse_fallbacks(
-        os.getenv(f"CHORUS_MODEL_{upper_profile}_FALLBACKS")
-    )
-    fallbacks = (
-        list(DEFAULT_FALLBACKS[normalized_profile])
-        if raw_fallbacks is None
-        else raw_fallbacks
-    )
-    temperature = DEFAULT_TEMPERATURES.get(
-        normalized_profile,
-        DEFAULT_TEMPERATURES["default"],
-    )
-    return model_name, fallbacks, temperature
+    """Return (primary_model, fallbacks, temperature) for the given profile."""
+    return ChorusSettings().get_model_config(profile)
 
 
 def get_timeout_for_model(model_name: str) -> float:
-    env_timeout = os.getenv("CHORUS_LLM_TIMEOUT_SECONDS")
-    if env_timeout:
-        try:
-            return float(env_timeout)
-        except ValueError:
-            pass
-
-    if model_name.startswith("ollama/"):
-        return 180.0
-    if model_name.startswith("anthropic/"):
-        return 120.0
-    return 45.0
+    """Return timeout in seconds, respecting CHORUS_LLM_TIMEOUT_SECONDS override."""
+    return ChorusSettings().get_timeout_for_model(model_name)
 
 
-def prepare_messages_for_model(
-    model_name: str, messages: List[Dict[str, str]]
-) -> List[Dict[str, str]]:
+def prepare_messages_for_model(model_name: str, messages: list[dict[str, str]]) -> list[dict[str, str]]:
     if not model_name.startswith("ollama/"):
         return messages
 
@@ -91,9 +35,7 @@ def prepare_messages_for_model(
 
     prepared_messages = [message.copy() for message in messages]
     if prepared_messages and prepared_messages[0].get("role") == "system":
-        prepared_messages[0]["content"] = (
-            f"{prepared_messages[0]['content']}\n\n{json_only_instruction}"
-        )
+        prepared_messages[0]["content"] = f"{prepared_messages[0]['content']}\n\n{json_only_instruction}"
     else:
         prepared_messages.insert(0, {"role": "system", "content": json_only_instruction})
 
@@ -106,38 +48,35 @@ def get_instructor_mode_for_model(model_name: str) -> instructor.Mode:
     return instructor.Mode.TOOLS
 
 
-def get_llm_client(model_name: str):
+def get_llm_client(model_name: str) -> instructor.Instructor:
     """Returns an instructor-patched litellm client for seamless structured outputs."""
     return instructor.from_litellm(
         litellm.completion,
         mode=get_instructor_mode_for_model(model_name),
     )
 
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def generate_structured_output(
-    response_model: Type[BaseModel],
-    messages: List[Dict[str, str]],
-    profile: str = "synthesis"
+    response_model: type[BaseModel],
+    messages: list[dict[str, str]],
+    profile: str = "synthesis",
 ) -> BaseModel:
-    """
-    Routes to the appropriate model based on task profile, with fallbacks and retries.
-    """
-    # 1. Environment-aware model routing & fallbacks
+    """Routes to the appropriate model based on task profile, with fallbacks and retries."""
     model_name, fallbacks, temperature = get_model_config(profile)
     timeout = get_timeout_for_model(model_name)
 
     client = get_llm_client(model_name)
     prepared_messages = prepare_messages_for_model(model_name, messages)
 
-    # 2. Resilient API Call
     response = client.chat.completions.create(
         model=model_name,
         fallbacks=fallbacks,
         response_model=response_model,
-        messages=prepared_messages,
+        messages=prepared_messages,  # type: ignore[arg-type]
         temperature=temperature,
         timeout=timeout,
-        max_retries=2 # LiteLLM level retries, in addition to tenacity
+        max_retries=2,  # LiteLLM level retries, in addition to tenacity
     )
-    
+
     return response

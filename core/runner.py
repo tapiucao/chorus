@@ -5,11 +5,11 @@ from typing import TypedDict, cast
 
 from sqlmodel import Session
 
-from core.errors import ChorusError, classify_exception
+from core.errors import classify_exception
 from core.graph_runtime import build_graph_config
 from core.logging_utils import get_logger, log_event
 from core.models import Run, RunStatus
-from core.state import FinalChorusState, build_initial_chorus_state
+from core.state import FinalChorusState, PipelineMode, build_initial_chorus_state
 from db.database import create_db_and_tables, engine
 from graph import build_chorus_graph
 
@@ -76,6 +76,7 @@ def create_run_record(mode: str, current_stage: str = "intake") -> int:
         session.add(run)
         session.commit()
         session.refresh(run)
+        assert run.id is not None
         return run.id
 
 
@@ -88,7 +89,7 @@ def execute_run(run_id: int, raw_input: str, mode: str) -> RunExecutionResult:
     _update_run_state(run_id, RunStatus.running, "intake")
     log_event(logger, logging.INFO, "run_started", run_id=run_id, mode=mode, current_stage="intake")
 
-    initial_state = build_initial_chorus_state(run_id=run_id, mode=mode, raw_input=raw_input)
+    initial_state = build_initial_chorus_state(run_id=run_id, mode=cast(PipelineMode, mode), raw_input=raw_input)
 
     try:
         app = build_chorus_graph()

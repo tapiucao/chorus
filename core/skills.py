@@ -1,6 +1,5 @@
 from typing import Literal, TypedDict
 
-
 StageName = Literal[
     "intake",
     "exploration",
@@ -105,11 +104,7 @@ def build_stage_system_prompt(stage: StageName, base_prompt: str) -> str:
     config = STAGE_SKILLS[stage]
     responsibilities = "\n".join(f"- {item}" for item in config["responsibilities"])
     anti_patterns = "\n".join(f"- {item}" for item in config["anti_patterns"])
-    auxiliary = (
-        config["auxiliary_skill"]
-        if config["auxiliary_skill"] is not None
-        else "none"
-    )
+    auxiliary = config["auxiliary_skill"] if config["auxiliary_skill"] is not None else "none"
 
     return (
         f"{base_prompt}\n\n"

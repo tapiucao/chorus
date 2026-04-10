@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, cast
 
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -21,16 +21,14 @@ class NodeRuntime(Protocol):
         messages: list[Message],
         *,
         profile: str,
-    ) -> StructuredOutputT:
-        ...
+    ) -> StructuredOutputT: ...
 
     def persist_artifact(
         self,
         run_id: int,
         artifact_type: ArtifactType,
         payload: BaseModel | dict[str, object],
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 class DefaultNodeRuntime:
@@ -43,7 +41,7 @@ class DefaultNodeRuntime:
         *,
         profile: str,
     ) -> StructuredOutputT:
-        return generate_structured_output(response_model, messages, profile=profile)
+        return cast(StructuredOutputT, generate_structured_output(response_model, messages, profile=profile))
 
     def persist_artifact(
         self,

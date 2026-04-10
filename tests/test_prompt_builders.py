@@ -73,7 +73,7 @@ def test_build_framing_prompt_includes_exploration_json():
 
     assert prompt["stage"] == "framing"
     assert "Exploration Findings" in prompt["messages"][1]["content"]
-    assert "\"problem_statement\":\"Receipt entry is slow\"" in prompt["messages"][1]["content"]
+    assert '"problem_statement":"Receipt entry is slow"' in prompt["messages"][1]["content"]
 
 
 def test_build_critic_prompt_preserves_ordered_option_semantics():
@@ -86,7 +86,7 @@ def test_build_critic_prompt_preserves_ordered_option_semantics():
     )
 
     content = prompt["messages"][1]["content"]
-    assert content.index("\"id\":\"1\"") < content.index("\"id\":\"2\"") < content.index("\"id\":\"3\"")
+    assert content.index('"id":"1"') < content.index('"id":"2"') < content.index('"id":"3"')
 
 
 def test_build_mediator_prompt_includes_critiques_and_options():
@@ -120,7 +120,7 @@ def test_build_mediator_prompt_includes_critiques_and_options():
     content = prompt["messages"][1]["content"]
     assert "Original Idea: Build a receipts app" in content
     assert "Critiques:" in content
-    assert "\"recommendation_status\":\"reject\"" in content
+    assert '"recommendation_status":"reject"' in content
 
 
 def test_build_implementation_prompt_falls_back_to_raw_input_without_project_spec():
@@ -140,4 +140,4 @@ def test_build_exploration_prompt_uses_synthesis_profile():
 def test_build_implementation_prompt_uses_serialized_project_spec_when_present():
     prompt = build_implementation_prompt("Build a receipts app", _project_spec())
 
-    assert "\"title\":\"Receipt AI\"" in prompt["messages"][1]["content"]
+    assert '"title":"Receipt AI"' in prompt["messages"][1]["content"]

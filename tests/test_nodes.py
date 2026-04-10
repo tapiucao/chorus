@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from langgraph.types import Command
+
 from agents.nodes import (
     critic_node_with_runtime,
     exploration_node_with_runtime,
@@ -13,7 +14,13 @@ from agents.nodes import (
     mediator_node_with_runtime,
 )
 from core.models import ArtifactType
-from core.schemas import CritiqueFinding, CritiqueReport, ImplementationSpec, OptionDraft, ProjectSpec
+from core.schemas import (
+    CritiqueFinding,
+    CritiqueReport,
+    ImplementationSpec,
+    OptionDraft,
+    ProjectSpec,
+)
 from core.state import CritiquesList, ExplorationDraft, MaturityClassification, OptionsBundle
 
 
@@ -93,7 +100,13 @@ def test_intake_node_uses_runtime_for_generation_and_prompt_contract():
     runtime = FakeRuntime({MaturityClassification: MaturityClassification(maturity="raw", summary="raw idea")})
 
     result = intake_node_with_runtime(
-        {"run_id": 1, "raw_input": "Build a receipts app", "mode": "idea_spec", "loop_count": 0, "current_stage": "intake"},
+        {
+            "run_id": 1,
+            "raw_input": "Build a receipts app",
+            "mode": "idea_spec",
+            "loop_count": 0,
+            "current_stage": "intake",
+        },
         runtime,
     )
 
@@ -217,7 +230,13 @@ def test_exploration_node_returns_typed_draft():
     runtime = FakeRuntime({ExplorationDraft: draft})
 
     result = exploration_node_with_runtime(
-        {"run_id": 1, "raw_input": "Build a receipts app", "mode": "idea_spec", "loop_count": 0, "current_stage": "exploration"},
+        {
+            "run_id": 1,
+            "raw_input": "Build a receipts app",
+            "mode": "idea_spec",
+            "loop_count": 0,
+            "current_stage": "exploration",
+        },
         runtime,
     )
 

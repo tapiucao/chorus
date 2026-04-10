@@ -1,13 +1,10 @@
-from sqlmodel import SQLModel, Session, create_engine
+from collections.abc import Generator
 
-from core.models import Artifact, Checkpoint, Run
+from sqlmodel import Session, SQLModel, create_engine
 
-# SQLite Persistence Day 0
-sqlite_file_name = "chorus.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
+from core.config import settings
 
-# Using echo=False to keep logs clean, can be toggled for debugging
-engine = create_engine(sqlite_url, echo=False)
+engine = create_engine(settings.db_url, echo=False)
 
 
 def create_db_and_tables() -> None:
@@ -15,7 +12,7 @@ def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
 
 
-def get_session():
+def get_session() -> Generator[Session, None, None]:
     """Dependency for session management."""
     with Session(engine) as session:
         yield session

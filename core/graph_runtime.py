@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from langgraph.checkpoint.memory import InMemorySaver
+import sqlite3
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+from core.config import settings
 
 
-GRAPH_CHECKPOINTER = InMemorySaver()
+def get_checkpointer() -> SqliteSaver:
+    """Return a SQLite-backed checkpointer so HITL state survives server restarts."""
+    conn = sqlite3.connect(settings.checkpoint_db_path, check_same_thread=False)
+    return SqliteSaver(conn)
 
 
 def build_graph_config(run_id: int) -> dict[str, dict[str, str]]:

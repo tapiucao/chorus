@@ -23,7 +23,7 @@ source venv/bin/activate
 Se precisar instalar dependencias de desenvolvimento:
 
 ```bash
-./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/pip install -e ".[dev]"
 ```
 
 ## 2. Configurar o provider
@@ -97,13 +97,40 @@ Resultado esperado:
 - a aba `Project Spec` recebe conteudo quando a run completa
 - em `full`, a aba `Implementation Spec` tambem aparece
 
-## 5. Teste rapido via API
+## 5. Autenticacao da API (opcional)
 
-Criar uma run:
+Por padrao, a API nao exige autenticacao — util em desenvolvimento local.
+
+Para habilitar autenticacao, exporte `CHORUS_API_KEY` antes de subir o servidor:
+
+```bash
+export CHORUS_API_KEY="sua-chave-aqui"
+```
+
+Com a chave configurada, todos os requests a `POST /api/runs` precisam do header:
+
+```
+Authorization: Bearer sua-chave-aqui
+```
+
+Sem a variavel definida, a autenticacao e ignorada silenciosamente.
+
+## 6. Teste rapido via API
+
+Criar uma run (sem auth):
 
 ```bash
 curl -X POST http://127.0.0.1:8011/api/runs \
   -H "Content-Type: application/json" \
+  -d '{"mode":"idea_spec","idea":"A tool that organizes receipts and exports CSV"}'
+```
+
+Criar uma run (com auth habilitada):
+
+```bash
+curl -X POST http://127.0.0.1:8011/api/runs \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sua-chave-aqui" \
   -d '{"mode":"idea_spec","idea":"A tool that organizes receipts and exports CSV"}'
 ```
 
@@ -121,7 +148,13 @@ curl -OJ http://127.0.0.1:8011/api/runs/1/download/project-spec.md
 curl -OJ http://127.0.0.1:8011/api/runs/1/download/implementation-spec.md
 ```
 
-## 6. Validacao local de codigo
+## 7. Validacao local de codigo
+
+Rodar lint:
+
+```bash
+./venv/bin/ruff check .
+```
 
 Rodar a suite principal:
 
@@ -135,7 +168,7 @@ Rodar tudo:
 ./venv/bin/pytest -q
 ```
 
-## 7. Problemas comuns
+## 8. Problemas comuns
 
 ### `invalid x-api-key`
 
@@ -198,13 +231,13 @@ Impacto:
 - o erro principal continua sendo o do provider ou do pipeline
 - esse traceback e secundario e hoje polui o log
 
-## 8. Higiene de segredo
+## 9. Higiene de segredo
 
 - nunca commite chaves em arquivos do repo
 - nunca deixe credenciais reais em handoffs ou docs
 - se uma chave apareceu no terminal compartilhado ou em conversa, revogue e gere outra
 
-## 9. Arquivos uteis
+## 10. Arquivos uteis
 
 - `README.md`
 - `docs/handoff-2026-04-10.md`

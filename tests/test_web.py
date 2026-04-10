@@ -2,17 +2,24 @@ import asyncio
 import json
 
 import pytest
-from fastapi import BackgroundTasks
-from fastapi import HTTPException
-from sqlmodel import SQLModel, Session, create_engine
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 from starlette.requests import Request
 
+import web.app as web_app
 from core.errors import ChorusValidationError
 from core.models import Artifact, ArtifactType, Run, RunStatus
 from core.schemas import ProjectSpec
-import web.app as web_app
-from web.app import RunRequest, create_run, download_implementation_spec_markdown, download_output_json, download_project_spec_markdown, get_run, index
+from web.app import (
+    RunRequest,
+    create_run,
+    download_implementation_spec_markdown,
+    download_output_json,
+    download_project_spec_markdown,
+    get_run,
+    index,
+)
 
 
 def test_index_endpoint_returns_html():
@@ -20,7 +27,7 @@ def test_index_endpoint_returns_html():
     response = index(request)
     body = response.body.decode("utf-8")
 
-    assert "<form id=\"idea-form\"" in body
+    assert '<form id="idea-form"' in body
     assert "Project Spec" in body
     assert "Implementation Spec" in body
     assert "Download JSON" in body
@@ -159,25 +166,69 @@ def _seed_run_and_artifacts(engine):
         return run.id
 
 
-def test_run_lookup_and_download_endpoints(monkeypatch: pytest.MonkeyPatch, test_engine):
+def test_run_lookup_and_download_endpoints(test_engine):
     run_id = _seed_run_and_artifacts(test_engine)
 
-    monkeypatch.setattr(web_app, "engine", test_engine)
-    monkeypatch.setattr(web_app, "create_db_and_tables", lambda: SQLModel.metadata.create_all(test_engine))
+    with Session(test_engine) as session:
+        payload = get_run(run_id, session=session)
+        assert payload["id"] == run_id
+        assert payload["documents"]["project_spec_markdown"].startswith("# Receipt AI")
+        assert payload["configured_skills"]["mediator"]["primary_skill"] == "scope-control"
 
-    payload = get_run(run_id)
-    assert payload["id"] == run_id
-    assert payload["documents"]["project_spec_markdown"].startswith("# Receipt AI")
-    assert payload["configured_skills"]["mediator"]["primary_skill"] == "scope-control"
+        json_response = download_output_json(run_id, session=session)
+        assert json.loads(json_response.body.decode("utf-8"))["id"] == run_id
 
-    json_response = download_output_json(run_id)
-    assert json.loads(json_response.body.decode("utf-8"))["id"] == run_id
+        md_response = download_project_spec_markdown(run_id, session=session)
+        assert md_response.body.decode("utf-8").startswith("# Receipt AI")
 
-    md_response = download_project_spec_markdown(run_id)
-    assert md_response.body.decode("utf-8").startswith("# Receipt AI")
+        with pytest.raises(HTTPException):
+            download_implementation_spec_markdown(run_id, session=session)
 
-    with pytest.raises(HTTPException):
-        download_implementation_spec_markdown(run_id)
+
+def test_require_api_key_rejects_missing_header(monkeypatch: pytest.MonkeyPatch):
+    from core.config import ChorusSettings
+    from web.app import require_api_key
+
+    monkeypatch.setattr("web.app.settings", ChorusSettings(api_key="secret"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_api_key(credentials=None)
+    assert exc_info.value.status_code == 401
+
+
+def test_require_api_key_rejects_wrong_token(monkeypatch: pytest.MonkeyPatch):
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from core.config import ChorusSettings
+    from web.app import require_api_key
+
+    monkeypatch.setattr("web.app.settings", ChorusSettings(api_key="secret"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_api_key(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong"))
+    assert exc_info.value.status_code == 401
+
+
+def test_require_api_key_accepts_correct_token(monkeypatch: pytest.MonkeyPatch):
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from core.config import ChorusSettings
+    from web.app import require_api_key
+
+    monkeypatch.setattr("web.app.settings", ChorusSettings(api_key="secret"))
+
+    result = require_api_key(credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials="secret"))
+    assert result is None  # no exception raised
+
+
+def test_require_api_key_is_noop_when_no_key_configured(monkeypatch: pytest.MonkeyPatch):
+    from core.config import ChorusSettings
+    from web.app import require_api_key
+
+    monkeypatch.setattr("web.app.settings", ChorusSettings(api_key=None))
+
+    result = require_api_key(credentials=None)
+    assert result is None  # auth disabled in dev
 
 
 def test_create_run_endpoint_returns_standard_error_payload():
@@ -196,14 +247,19 @@ def test_create_run_endpoint_returns_standard_error_payload():
 
 def test_handle_chorus_error_maps_provider_to_502():
     request = Request({"type": "http", "method": "GET", "path": "/boom", "headers": []})
-    response = asyncio.run(web_app.handle_chorus_error(request, web_app.ChorusError("upstream failed", code="provider_error", retryable=True)))
+    response = asyncio.run(
+        web_app.handle_chorus_error(
+            request, web_app.ChorusError("upstream failed", code="provider_error", retryable=True)
+        )
+    )
 
     assert response.status_code == 502
 
 
 def test_handle_chorus_error_maps_internal_to_500():
     request = Request({"type": "http", "method": "GET", "path": "/boom", "headers": []})
-    response = asyncio.run(web_app.handle_chorus_error(request, web_app.ChorusError("unexpected failure", code="internal_error")))
+    response = asyncio.run(
+        web_app.handle_chorus_error(request, web_app.ChorusError("unexpected failure", code="internal_error"))
+    )
 
     assert response.status_code == 500
-

@@ -1,28 +1,38 @@
 import pytest
 from pydantic import ValidationError
-from core.schemas import OptionDraft, ProjectSpec
+
 from agents.nodes import MaturityClassification, OptionsList
+from core.schemas import OptionDraft
 from core.state import ChorusState, ExplorationDraft, build_initial_chorus_state
+
 
 def test_maturity_classification_strict_literal():
     # Valid
     valid = MaturityClassification(maturity="raw", summary="test")
     assert valid.maturity == "raw"
-    
+
     # Invalid
     with pytest.raises(ValidationError):
         MaturityClassification(maturity="semi-mature", summary="test")
 
+
 def test_options_list_enforces_three_categories():
     draft = OptionDraft(
-        id="1", title="A", summary="A", benefits=["A"], trade_offs=["A"],
-        complexity="low", operational_risk="low", implementation_effort="low", alignment_with_vibe="Good"
+        id="1",
+        title="A",
+        summary="A",
+        benefits=["A"],
+        trade_offs=["A"],
+        complexity="low",
+        operational_risk="low",
+        implementation_effort="low",
+        alignment_with_vibe="Good",
     )
-    
+
     # Missing scalable and minimal_cost
     with pytest.raises(ValidationError):
         OptionsList(simplest_viable=draft)
-        
+
     # Valid
     valid = OptionsList(simplest_viable=draft, scalable=draft, minimal_cost=draft)
     assert valid.simplest_viable.id == "1"
@@ -30,16 +40,37 @@ def test_options_list_enforces_three_categories():
 
 def test_options_list_preserves_named_roles_and_list_order():
     simplest = OptionDraft(
-        id="1", title="Simple", summary="A", benefits=["A"], trade_offs=["A"],
-        complexity="low", operational_risk="low", implementation_effort="low", alignment_with_vibe="Good"
+        id="1",
+        title="Simple",
+        summary="A",
+        benefits=["A"],
+        trade_offs=["A"],
+        complexity="low",
+        operational_risk="low",
+        implementation_effort="low",
+        alignment_with_vibe="Good",
     )
     scalable = OptionDraft(
-        id="2", title="Scale", summary="B", benefits=["B"], trade_offs=["B"],
-        complexity="medium", operational_risk="medium", implementation_effort="medium", alignment_with_vibe="Good"
+        id="2",
+        title="Scale",
+        summary="B",
+        benefits=["B"],
+        trade_offs=["B"],
+        complexity="medium",
+        operational_risk="medium",
+        implementation_effort="medium",
+        alignment_with_vibe="Good",
     )
     low_cost = OptionDraft(
-        id="3", title="Cheap", summary="C", benefits=["C"], trade_offs=["C"],
-        complexity="low", operational_risk="low", implementation_effort="low", alignment_with_vibe="Good"
+        id="3",
+        title="Cheap",
+        summary="C",
+        benefits=["C"],
+        trade_offs=["C"],
+        complexity="low",
+        operational_risk="low",
+        implementation_effort="low",
+        alignment_with_vibe="Good",
     )
 
     bundle = OptionsList(simplest_viable=simplest, scalable=scalable, minimal_cost=low_cost)

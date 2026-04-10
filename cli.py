@@ -2,17 +2,17 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 
 # Ensure local imports work regardless of execution directory
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from core.errors import ChorusError, ChorusProviderError, ChorusValidationError
-from core.models import Artifact, Run, RunStatus
-from core.skills import STAGE_SKILLS
-from core.runner import run_chorus_pipeline
-from db.database import create_db_and_tables, engine
 from sqlmodel import Session, select
+
+from core.errors import ChorusError, ChorusProviderError, ChorusValidationError
+from core.models import Artifact, Run
+from core.runner import run_chorus_pipeline
+from core.skills import STAGE_SKILLS
+from db.database import create_db_and_tables, engine
 
 # Exit Codes
 EXIT_SUCCESS = 0
@@ -20,9 +20,11 @@ EXIT_VALIDATION_ERR = 1
 EXIT_PROVIDER_ERR = 2
 EXIT_PAUSED = 3
 
+
 def print_v(msg, verbose=False):
     if verbose:
         print(msg, file=sys.stderr)
+
 
 def _status_value(value):
     return value.value if hasattr(value, "value") else value
@@ -39,7 +41,7 @@ def _exit_code_for_error(exc: Exception) -> int:
 def _read_raw_input(args) -> str:
     if args.input_file:
         try:
-            with open(args.input_file, "r", encoding="utf-8") as f:
+            with open(args.input_file, encoding="utf-8") as f:
                 return f.read()
         except Exception as exc:
             print(f"Error reading file {args.input_file}: {exc}", file=sys.stderr)
@@ -125,7 +127,7 @@ def run_pipeline(args):
             sys.exit(EXIT_PAUSED)
 
         sys.exit(EXIT_SUCCESS)
-            
+
     except Exception as e:
         err_msg = str(e)
         print_v(f"[VERBOSE] Exception trace: {err_msg}", args.verbose)
@@ -133,15 +135,16 @@ def run_pipeline(args):
             print(f"\n[!] Pipeline Failed: {err_msg}", file=sys.stderr)
         sys.exit(_exit_code_for_error(e))
 
+
 def inspect_run(args):
     create_db_and_tables()
-    
+
     with Session(engine) as session:
         run = session.get(Run, args.run_id)
         if not run:
             print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
             sys.exit(EXIT_VALIDATION_ERR)
-            
+
         if args.output == "json":
             artifacts = session.exec(select(Artifact).where(Artifact.run_id == run.id)).all()
             out = {
@@ -153,7 +156,7 @@ def inspect_run(args):
             }
             print(json.dumps(out, indent=2))
             sys.exit(EXIT_SUCCESS)
-            
+
         print(f"Run ID: {run.id}")
         print(f"Mode: {run.mode}")
         print(f"Status: {_status_value(run.status)}")
@@ -161,12 +164,13 @@ def inspect_run(args):
         print("\nConfigured Skills:")
         for stage, config in STAGE_SKILLS.items():
             print(f"- {stage}: {config['primary_skill']} (aux: {config['auxiliary_skill'] or 'none'})")
-        
+
         artifacts = session.exec(select(Artifact).where(Artifact.run_id == run.id)).all()
         print(f"\nArtifacts ({len(artifacts)}):")
         for artifact in artifacts:
             _print_artifact_preview(artifact)
-            
+
+
 def resume_run(args):
     print("Error: Graph state checkpointing for HITL resume is not fully wired yet.", file=sys.stderr)
     print("This will require migrating LangGraph MemorySaver to SQLite in the next sprint.", file=sys.stderr)
@@ -191,17 +195,20 @@ def inspect_skills(args):
 
     sys.exit(EXIT_SUCCESS)
 
+
 def main():
     parser = argparse.ArgumentParser(description="Chorus - Idea Maturation Engine CLI")
     # Global args
     parser.add_argument("--output", choices=["json", "pretty"], default="pretty", help="Output format")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging to stderr")
-    
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Run command
     run_parser = subparsers.add_parser("run", help="Start a new Chorus pipeline run")
-    run_parser.add_argument("--mode", choices=["idea_spec", "spec_impl", "full"], default="idea_spec", help="Pipeline mode")
+    run_parser.add_argument(
+        "--mode", choices=["idea_spec", "spec_impl", "full"], default="idea_spec", help="Pipeline mode"
+    )
     run_parser.add_argument("--input-file", type=str, help="Path to input text file")
     run_parser.add_argument("idea", type=str, nargs="?", help="Raw idea text")
     run_parser.set_defaults(func=run_pipeline)
@@ -210,7 +217,7 @@ def main():
     inspect_parser = subparsers.add_parser("inspect", help="Inspect a specific run and its artifacts")
     inspect_parser.add_argument("--run-id", type=int, required=True, help="Run ID to inspect")
     inspect_parser.set_defaults(func=inspect_run)
-    
+
     # Resume command
     resume_parser = subparsers.add_parser("resume", help="Resume a paused HITL run")
     resume_parser.add_argument("--run-id", type=int, required=True, help="Run ID to resume")
@@ -222,6 +229,7 @@ def main():
 
     args = parser.parse_args()
     args.func(args)
+
 
 if __name__ == "__main__":
     main()

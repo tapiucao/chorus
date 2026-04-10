@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from core.schemas import ImplementationSpec, ProjectSpec
 
@@ -134,5 +134,7 @@ def build_documents(
     """Build Markdown documents for the available artifacts."""
     return {
         "project_spec_markdown": render_project_spec_markdown(project_spec) if project_spec else None,
-        "implementation_spec_markdown": render_implementation_spec_markdown(implementation_spec) if implementation_spec else None,
+        "implementation_spec_markdown": render_implementation_spec_markdown(implementation_spec)
+        if implementation_spec
+        else None,
     }
