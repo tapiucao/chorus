@@ -31,6 +31,6 @@ jobs:
         run: mypy core/ web/ agents/ llm/ db/
 
       - name: Run tests
-        run: pytest --tb=short --cov=. --cov-report=term-missing --cov-omit="venv/*,tests/*"
+        run: pytest --tb=short --cov=. --cov-report=term-missing
         env:
           LITELLM_LOCAL_MODEL_COST_MAP: "true"

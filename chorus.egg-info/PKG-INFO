@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: chorus
+Version: 0.1.0
+Requires-Python: >=3.12
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: instructor<2,>=1.7
+Requires-Dist: jinja2<4,>=3.1
+Requires-Dist: langgraph<2,>=0.2
+Requires-Dist: litellm<2,>=1.56
+Requires-Dist: pydantic-settings<3,>=2.0
+Requires-Dist: sqlmodel<1,>=0.0.21
+Requires-Dist: tenacity<10,>=8.5
+Requires-Dist: uvicorn<1,>=0.30
+Provides-Extra: dev
+Requires-Dist: httpx<1,>=0.27; extra == "dev"
+Requires-Dist: mypy<2,>=1.10; extra == "dev"
+Requires-Dist: pytest<10,>=8.0; extra == "dev"
+Requires-Dist: pytest-cov<7,>=5.0; extra == "dev"
+Requires-Dist: ruff<1,>=0.6; extra == "dev"
